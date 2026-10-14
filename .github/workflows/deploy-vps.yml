@@ -1,0 +1,77 @@
+name: Deploy Spring Boot to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-image:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image-meta.outputs.image }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Resolve lowercase image name
+        id: image-meta
+        run: |
+          IMAGE_NAME="ghcr.io/${{ github.repository }}:latest"
+          IMAGE_LOWER=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE_LOWER}" >> $GITHUB_OUTPUT
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ steps.image-meta.outputs.image }} .
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ steps.image-meta.outputs.image }}
+
+  deploy-vps:
+    name: Deploy to VPS
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy application on VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_NAME: ${{ needs.build-image.outputs.image }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: IMAGE_NAME,GHCR_USER,GHCR_TOKEN
+          script: |
+            # Authenticate with GHCR on VPS if token is provided (supports private packages)
+            if [ -n "$GHCR_TOKEN" ]; then
+              echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            fi
+
+            # Pull the latest Docker Image
+            docker pull "$IMAGE_NAME"
+
+            # Stop and remove existing container if present
+            if docker ps -a --format '{{.Names}}' | grep -Eq "^my-app$"; then
+              echo "Stopping and removing existing container: my-app"
+              docker stop my-app
+              docker rm my-app
+            fi
+
+            # Start new container with port 8080 mapped
+            docker run -d --name my-app -p 8080:8080 "$IMAGE_NAME"

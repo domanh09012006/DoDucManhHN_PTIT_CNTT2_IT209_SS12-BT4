@@ -1,0 +1,42 @@
+
+name: Multi-Environment CD
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://api.staging.example.com
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v5
+
+      - name: Deploy to Staging
+        run: echo "Deploying application to Staging..."
+
+  deploy-prod:
+    name: Deploy to Production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.prod.example.com
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v5
+
+      - name: Deploy to Production
+        run: echo "Deploying application to Production..."
